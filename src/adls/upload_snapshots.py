@@ -37,5 +37,6 @@ def upload_snapshots(snapshot_dir):
         with local_file.open("rb") as file_handle:
             file_client.upload_data(file_handle.read(), overwrite=True)
         uploaded += 1
+        print(f"Uploaded {local_file.name} to ADLS ({uploaded} files uploaded so far)", flush=True)
 
     return uploaded
