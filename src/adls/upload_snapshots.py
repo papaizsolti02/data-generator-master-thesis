@@ -4,7 +4,7 @@ import os
 ADLS_FILE_SYSTEM = os.getenv("DATALAKE_FILE_SYSTEM", "generated-data")
 ADLS_DIRECTORY = os.getenv("DATALAKE_DIRECTORY", "daily")
 
-def upload_snapshots_to_adls(snapshot_dir):
+def upload_snapshots(snapshot_dir):
     try:
         from azure.core.exceptions import ResourceExistsError
         from azure.storage.filedatalake import DataLakeServiceClient
