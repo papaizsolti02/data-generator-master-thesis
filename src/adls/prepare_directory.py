@@ -1,6 +1,7 @@
 import os
+import time
 
-from azure.core.exceptions import ResourceExistsError
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.filedatalake import DataLakeServiceClient
 
 
@@ -19,11 +20,22 @@ def main() -> None:
     service = DataLakeServiceClient.from_connection_string(connection_string)
     filesystem = service.get_file_system_client(filesystem_name)
 
-    try:
-        filesystem.create_file_system()
-        print(f"Created ADLS filesystem: {filesystem_name}")
-    except ResourceExistsError:
-        print(f"ADLS filesystem already exists: {filesystem_name}")
+    # Create filesystem with retry for timing issues
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            filesystem.create_file_system()
+            print(f"Created ADLS filesystem: {filesystem_name}")
+            break
+        except ResourceExistsError:
+            print(f"ADLS filesystem already exists: {filesystem_name}")
+            break
+        except ResourceNotFoundError:
+            if attempt < max_retries - 1:
+                print(f"Filesystem creation attempt {attempt + 1} failed, retrying in 1 second...")
+                time.sleep(1)
+            else:
+                raise
 
     directory = filesystem.get_directory_client(directory_name)
     try:
