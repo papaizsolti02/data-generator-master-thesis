@@ -13,12 +13,12 @@ def simulate(seed=1, N_initial=1000000, save_snapshots=True):
     set_seed(seed)
     start_date = datetime(2023, 1, 1)
 
-    print(f"\n{'=' * 70}")
-    print(f"Simulation started | seed={seed} | N={N_initial:,}")
-    print(f"4x4 grid: {len(GRID)} combinations over 100 days")
-    print(f"r values: {R_VALUES}")
-    print(f"c values: {C_VALUES}")
-    print(f"{'=' * 70}")
+    print(f"\n{'=' * 70}", flush=True)
+    print(f"Simulation started | seed={seed} | N={N_initial:,}", flush=True)
+    print(f"4x4 grid: {len(GRID)} combinations over 100 days", flush=True)
+    print(f"r values: {R_VALUES}", flush=True)
+    print(f"c values: {C_VALUES}", flush=True)
+    print(f"{'=' * 70}", flush=True)
 
     df = generate_initial_snapshot(N=N_initial)
     if save_snapshots:
@@ -27,7 +27,7 @@ def simulate(seed=1, N_initial=1000000, save_snapshots=True):
         df["r"] = None
         df["c"] = None
         df.to_csv(OUTPUT_DIR / f"seed{seed}_day000.csv", index=False)
-    print(f"Day   0 | Initial snapshot | Active users: {len(df):>9,}")
+    print(f"Day   0 | Initial snapshot | Active users: {len(df):>9,}", flush=True)
 
     for day in range(1, 101):
         r, c = get_rc_for_day(day)
@@ -58,11 +58,12 @@ def simulate(seed=1, N_initial=1000000, save_snapshots=True):
             f"Active: {len(df):>9,} | "
             f"Churn: {churned:>5,} | "
             f"Modified: {modified:>6,} | "
-            f"New: {added:>4,}"
+            f"New: {added:>4,}",
+            flush=True
         )
 
         if save_snapshots:
             df.to_csv(OUTPUT_DIR / f"seed{seed}_day{day:03d}.csv", index=False)
 
-    print(f"\nDone! 101 snapshots saved to: {OUTPUT_DIR}/")
+    print(f"\nDone! 101 snapshots saved to: {OUTPUT_DIR}/", flush=True)
     return df
