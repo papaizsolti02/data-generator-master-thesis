@@ -165,7 +165,7 @@ BEGIN
         LEFT JOIN [prod].[Users] AS p
             ON ISNULL(p.[Rowhash], 0x0) = ISNULL(s.[Rowhash], 0x0)
             AND p.[IsActive] = 1
-        WHERE 
+        WHERE
             p.[Id] IS NULL;
 
         SET @InsertedCount = @@ROWCOUNT;
