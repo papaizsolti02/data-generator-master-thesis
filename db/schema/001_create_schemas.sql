@@ -1,0 +1,23 @@
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'raw')
+BEGIN
+    EXEC('CREATE SCHEMA raw');
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'stg')
+BEGIN
+    EXEC('CREATE SCHEMA stg');
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'dw')
+BEGIN
+    EXEC('CREATE SCHEMA dw');
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'ctl')
+BEGIN
+    EXEC('CREATE SCHEMA ctl');
+END
+GO
