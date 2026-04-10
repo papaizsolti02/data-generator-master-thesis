@@ -1,10 +1,10 @@
-----------------------------------------------------------------------
+-- ----------------------------------------------------------------------
 -- Author: Csaba-Zsolt Papai
 -- Date: 2026-04-10
 -- Name: raw.Users
 -- Description: Stores raw user snapshot data from the generator.
 -- Version: 1.0
-----------------------------------------------------------------------
+-- ----------------------------------------------------------------------
 CREATE TABLE [raw].[Users]
 (
     [Id] INT IDENTITY (1, 1) PRIMARY KEY,
@@ -26,6 +26,6 @@ CREATE TABLE [raw].[Users]
     [MarketingConsent] BIT NULL,
     [PreferredLanguage] NVARCHAR(10) NULL,
     [ContentLanguage] NVARCHAR(10) NULL,
-    [PlanAddons] NVARCHAR(100) NULL,
+    [PlanAddons] NVARCHAR(100) NULL
 );
 GO
