@@ -6,7 +6,7 @@
 -- Version: 1.0
 -- -----------------------------------------------------------------------------
 
-CREATE PROCEDURE [prod].[usp_MergeUsers]
+CREATE PROCEDURE [prod].[usp_MergeUsers] -- noqa: 
 AS
 BEGIN
     SET NOCOUNT ON;
