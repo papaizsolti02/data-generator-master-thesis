@@ -1,4 +1,4 @@
-<Project Sdk="MSBuild.Sdk.SqlProj/3.2.0">
+<Project Sdk="MSBuild.Sdk.SqlProj/4.1.1">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <SqlServerVersion>SqlAzure</SqlServerVersion>
@@ -9,5 +9,9 @@
 
   <ItemGroup>
     <Content Include="src\**\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PostDeploy Include="PostDeploy.sql" />
   </ItemGroup>
 </Project>
