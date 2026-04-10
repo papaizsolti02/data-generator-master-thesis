@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -37,10 +37,10 @@ jobs:
     needs: clean-adls
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -62,10 +62,10 @@ jobs:
     needs: prepare-adls-directory
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -75,7 +75,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Generate and upload
-        run: python src/data_generator.py
+        run: python -m src.data_generator
         env:
           DATALAKE_CONNECTION_STRING: ${{ secrets.DATALAKE_CONNECTION_STRING }}
           DATALAKE_KEY: ${{ secrets.DATALAKE_KEY }}
