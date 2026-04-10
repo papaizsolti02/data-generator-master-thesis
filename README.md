@@ -20,6 +20,62 @@ A simple project that:
 - `DATALAKE_CONNECTION_STRING`
 - `DATALAKE_KEY` (kept in pipeline env because you already store it)
 
+## Database CI/CD (Schema-Only Promotion)
+
+This repository now includes a database deployment structure under `db/`.
+
+The deployment model is schema-only promotion:
+- Dev and Prod receive the same SQL artifacts from source control.
+- Data is not copied from Dev to Prod.
+
+### Folder structure
+
+- `db/schema/`: Schema creation scripts (`raw`, `stg`, `dw`, `ctl`)
+- `db/tables/`: Table DDL for control, staging, and warehouse tables
+- `db/indexes/`: Index definitions
+- `db/views/`: View definitions
+- `db/stored_procedures/`: Stored procedure definitions
+- `scripts/deploy_db.ps1`: Ordered SQL deployment script
+
+### GitHub Actions workflows
+
+- `.github/workflows/deploy-db-dev.yml`
+	- Triggers on changes under `db/**` and manual dispatch
+	- Deploys DB artifacts to the Dev database
+
+- `.github/workflows/deploy-db-prod.yml`
+	- Manual trigger only (`workflow_dispatch`)
+	- Deploys the same DB artifacts to the Prod database
+
+### Required GitHub secrets
+
+Shared server/user:
+- `DB_SERVER`
+- `DB_USER`
+- `DB_PASSWORD`
+
+Dev:
+- `DEV_DB_NAME`
+
+Prod:
+- `PROD_DB_NAME`
+
+### Orphan cleanup behavior
+
+The deployment script supports orphan cleanup (`-CleanupOrphans`) and both workflows enable it.
+
+- Objects managed in source control are detected from SQL files under `db/**`.
+- Objects in the database that are not present in source control are dropped.
+- `temp` schema is always excluded from cleanup.
+- System schemas (`sys`, `INFORMATION_SCHEMA`) are excluded.
+
+This gives you source-controlled schema parity while preserving any temporary objects under `temp`.
+
+### Recommended environment protection
+
+- Use GitHub Environments: `dev`, `prod`
+- Configure required reviewers for `prod` to enforce manual approval
+
 ## Quick start
 
 ```bash
