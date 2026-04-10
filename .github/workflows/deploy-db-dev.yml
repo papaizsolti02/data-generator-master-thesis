@@ -25,6 +25,7 @@ jobs:
             db_changed:
               - 'db/dacpac/**'
               - '.github/workflows/deploy-db-dev.yml'
+
   lint-sql:
     runs-on: ubuntu-latest
     needs: detect-db-changes
