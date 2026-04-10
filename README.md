@@ -20,56 +20,57 @@ A simple project that:
 - `DATALAKE_CONNECTION_STRING`
 - `DATALAKE_KEY` (kept in pipeline env because you already store it)
 
-## Database CI/CD (Schema-Only Promotion)
+## Database CI/CD (DACPAC Promotion)
 
-This repository now includes a database deployment structure under `db/`.
+This repository now includes a DACPAC-based database project under `db/dacpac/`.
 
-The deployment model is schema-only promotion:
+The deployment model is artifact-based schema promotion:
 - Dev and Prod receive the same SQL artifacts from source control.
 - Data is not copied from Dev to Prod.
+- A DACPAC is built once in CI and then published to each environment.
 
-### Folder structure
+### DACPAC project structure
 
-- `db/schema/`: Schema creation scripts (`raw`, `stg`, `dw`, `ctl`)
-- `db/tables/`: Table DDL for control, staging, and warehouse tables
-- `db/indexes/`: Index definitions
-- `db/views/`: View definitions
-- `db/stored_procedures/`: Stored procedure definitions
-- `scripts/deploy_db.ps1`: Ordered SQL deployment script
+- `db/dacpac/DataWarehouse.sqlproj`: SQL project file
+- `db/dacpac/src/Schemas/`: schema objects
+- `db/dacpac/src/Tables/`: table objects
+- `db/dacpac/src/Views/`: view objects
+- `db/dacpac/src/StoredProcedures/`: stored procedures
 
 ### GitHub Actions workflows
 
 - `.github/workflows/deploy-db-dev.yml`
-	- Triggers on changes under `db/**` and manual dispatch
-	- Deploys DB artifacts to the Dev database
+  - Manual dispatch or pull request to `main`
+  - Lints SQL first, then builds DACPAC, then publishes to Dev only
 
-- `.github/workflows/deploy-db-prod.yml`
-	- Manual trigger only (`workflow_dispatch`)
-	- Deploys the same DB artifacts to the Prod database
+- `.github/workflows/deploy-db.yml`
+  - Triggers on push to `main`
+  - Lints SQL first, then builds DACPAC once, then publishes to Prod only
+  - No manual dispatch for this workflow
 
 ### Required GitHub secrets
 
-Shared server/user:
 - `DB_SERVER`
 - `DB_USER`
 - `DB_PASSWORD`
-
-Dev:
 - `DEV_DB_NAME`
-
-Prod:
 - `PROD_DB_NAME`
 
-### Orphan cleanup behavior
+### Drop behavior
 
-The deployment script supports orphan cleanup (`-CleanupOrphans`) and both workflows enable it.
+Current DACPAC publish arguments use:
 
-- Objects managed in source control are detected from SQL files under `db/**`.
-- Objects in the database that are not present in source control are dropped.
-- `temp` schema is always excluded from cleanup.
-- System schemas (`sys`, `INFORMATION_SCHEMA`) are excluded.
+- `/p:DropObjectsNotInSource=false`
 
-This gives you source-controlled schema parity while preserving any temporary objects under `temp`.
+This means missing objects are not dropped automatically. If you later want controlled cleanup, you can switch this to true and add additional safety gates.
+
+### SQLFluff linting
+
+SQLFluff configuration is stored in [ .sqlfluff](.sqlfluff).
+
+- Dialect: `tsql`
+- Lint target: `db/dacpac/src/`
+- Linting runs as the first job inside the DB deployment workflows, so deployment fails if lint fails
 
 ### Recommended environment protection
 
