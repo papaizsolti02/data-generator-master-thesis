@@ -38,9 +38,9 @@ BEGIN
     END;
 
     IF @NormalizedEnvironmentName IS NOT NULL
-       AND @NormalizedEnvironmentName NOT IN ('dev', 'prod', 'test', 'qa')
+       AND @NormalizedEnvironmentName NOT IN ('Development', 'Production', 'Testing', 'QA')
     BEGIN
-        THROW 51012, 'EnvironmentName must be one of: dev, test, qa, prod.', 1;
+        THROW 51012, 'EnvironmentName must be one of: Development, Production, Testing, QA.', 1;
     END;
 
     BEGIN TRY
