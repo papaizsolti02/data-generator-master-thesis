@@ -449,7 +449,10 @@
 							"type": "String"
 						},
 						"EnvironmentName": {
-							"value": "Dev",
+							"value": {
+								"value": "@pipeline().parameters.EnvironmentName",
+								"type": "Expression"
+							},
 							"type": "String"
 						},
 						"TriggerType": {
@@ -486,6 +489,13 @@
 								"type": "Expression"
 							},
 							"type": "Decimal"
+						},
+						"SCD2Method": {
+							"value": {
+								"value": "@pipeline().parameters.SCD2Method",
+								"type": "Expression"
+							},
+							"type": "String"
 						}
 					}
 				},
@@ -701,6 +711,14 @@
 			"fileName": {
 				"type": "string",
 				"defaultValue": "users_day000.csv"
+			},
+			"SCD2Method": {
+				"type": "string",
+				"defaultValue": "FullSCD2"
+			},
+			"EnvironmentName": {
+				"type": "string",
+				"defaultValue": "Dev"
 			}
 		},
 		"folder": {
