@@ -1,0 +1,291 @@
+{
+	"name": "pl_Master_Full_SCD2_ETL",
+	"properties": {
+		"activities": [
+			{
+				"name": "Failure - Pipeline Monitoring Finish_copy1",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "Execute Full SCD2 ETL",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[monitor].[usp_PipelineRunFinish]",
+					"storedProcedureParameters": {
+						"PipelineRunId": {
+							"value": {
+								"value": "@pipeline().RunId",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"Status": {
+							"value": "Failed",
+							"type": "String"
+						},
+						"ErrorCode": {
+							"value": {
+								"value": "@activity('Execute Full SCD2 ETL').output.error.errorCode",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"ErrorMessage": {
+							"value": {
+								"value": "@activity('Execute Full SCD2 ETL').output.error.errorMessage",
+								"type": "Expression"
+							},
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_sql_db_dev",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Execute Full SCD2 ETL",
+				"description": "Execute Full SCD2 ETL pipeline",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "Pipeline Monitoring Start",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "pl_Full_SCD2_ETL",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true,
+					"parameters": {
+						"fileName": {
+							"value": "@pipeline().parameters.fileName",
+							"type": "Expression"
+						},
+						"SCD2Method": {
+							"value": "@pipeline().parameters.SCD2Method",
+							"type": "Expression"
+						},
+						"EnvironmentName": {
+							"value": "@pipeline().parameters.EnvironmentName",
+							"type": "Expression"
+						},
+						"MasterPipelineRunId": {
+							"value": "@pipeline().RunId",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "Pipeline Monitoring Start",
+				"description": "Execute Starting Pipeline Monitoring Procedure",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "Lookup Rvalue and Cvalue from the CSV file",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[monitor].[usp_PipelineRunStart]",
+					"storedProcedureParameters": {
+						"PipelineRunId": {
+							"value": {
+								"value": "@pipeline().RunId",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"PipelineName": {
+							"value": {
+								"value": "@pipeline().Pipeline",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"EnvironmentName": {
+							"value": {
+								"value": "@pipeline().parameters.EnvironmentName",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"TriggerType": {
+							"value": {
+								"value": "@pipeline().TriggerType",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"TriggerName": {
+							"value": {
+								"value": "@pipeline().TriggerName",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"SourceFileName": {
+							"value": {
+								"value": "@pipeline().parameters.fileName",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"RValue": {
+							"value": {
+								"value": "@activity('Lookup Rvalue and Cvalue from the CSV file').output.firstRow.RValue",
+								"type": "Expression"
+							},
+							"type": "Decimal"
+						},
+						"CValue": {
+							"value": {
+								"value": "@activity('Lookup Rvalue and Cvalue from the CSV file').output.firstRow.CValue",
+								"type": "Expression"
+							},
+							"type": "Decimal"
+						},
+						"SCD2Method": {
+							"value": {
+								"value": "@pipeline().parameters.SCD2Method",
+								"type": "Expression"
+							},
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_sql_db_dev",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Lookup Rvalue and Cvalue from the CSV file",
+				"description": "Get Rvalue and Cvalue from the CSV file",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "DelimitedTextSource",
+						"storeSettings": {
+							"type": "AzureBlobStorageReadSettings",
+							"recursive": true,
+							"enablePartitionDiscovery": false
+						},
+						"formatSettings": {
+							"type": "DelimitedTextReadSettings"
+						}
+					},
+					"dataset": {
+						"referenceName": "one_file_users",
+						"type": "DatasetReference",
+						"parameters": {
+							"pfileName": {
+								"value": "@pipeline().parameters.fileName",
+								"type": "Expression"
+							}
+						}
+					}
+				}
+			},
+			{
+				"name": "Success - Pipeline Monitoring Finish",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "Execute Full SCD2 ETL",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[monitor].[usp_PipelineRunFinish]",
+					"storedProcedureParameters": {
+						"PipelineRunId": {
+							"value": {
+								"value": "@pipeline().RunId",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"Status": {
+							"value": "Succeeded",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_sql_db_dev",
+					"type": "LinkedServiceReference"
+				}
+			}
+		],
+		"parameters": {
+			"fileName": {
+				"type": "string",
+				"defaultValue": "users_day000.csv"
+			},
+			"SCD2Method": {
+				"type": "string",
+				"defaultValue": "FullSCD2"
+			},
+			"EnvironmentName": {
+				"type": "string",
+				"defaultValue": "Development"
+			}
+		},
+		"folder": {
+			"name": "full_scd2_pipelines/Development/Full_SCD2"
+		},
+		"annotations": []
+	}
+}
