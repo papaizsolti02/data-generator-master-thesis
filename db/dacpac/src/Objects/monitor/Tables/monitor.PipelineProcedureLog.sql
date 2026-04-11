@@ -8,7 +8,7 @@
 CREATE TABLE [monitor].[PipelineProcedureLog]
 (
     [Id] BIGINT IDENTITY (1, 1) NOT NULL,
-    [PipelineRunId] NVARCHAR(128) NOT NULL,
+    [PipelineRunLogId] BIGINT NOT NULL,
     [ProcedureName] SYSNAME NOT NULL,
     [ProcedurePhase] NVARCHAR(20) NOT NULL,
     [StartUtc] DATETIME2(3) NOT NULL,
@@ -30,16 +30,16 @@ CREATE TABLE [monitor].[PipelineProcedureLog]
     [CreatedUtc] DATETIME2(3) NOT NULL CONSTRAINT [DF_monitor_PipelineProcedureLog_CreatedUtc] DEFAULT (SYSUTCDATETIME()),
     [UpdatedUtc] DATETIME2(3) NOT NULL CONSTRAINT [DF_monitor_PipelineProcedureLog_UpdatedUtc] DEFAULT (SYSUTCDATETIME()),
     CONSTRAINT [PK_monitor_PipelineProcedureLog] PRIMARY KEY CLUSTERED ([Id] ASC),
-    CONSTRAINT [UQ_monitor_PipelineProcedureLog_Run_Proc] UNIQUE ([PipelineRunId], [ProcedureName]),
-    CONSTRAINT [FK_monitor_PipelineProcedureLog_PipelineRunLog] FOREIGN KEY ([PipelineRunId])
-        REFERENCES [monitor].[PipelineRunLog] ([PipelineRunId]),
+    CONSTRAINT [UQ_monitor_PipelineProcedureLog_Run_Proc] UNIQUE ([PipelineRunLogId], [ProcedureName]),
+    CONSTRAINT [FK_monitor_PipelineProcedureLog_PipelineRunLog] FOREIGN KEY ([PipelineRunLogId])
+        REFERENCES [monitor].[PipelineRunLog] ([Id]),
     CONSTRAINT [CK_monitor_PipelineProcedureLog_Status] CHECK ([Status] IN ('Started', 'Succeeded', 'Failed', 'Cancelled')),
     CONSTRAINT [CK_monitor_PipelineProcedureLog_Phase] CHECK ([ProcedurePhase] IN ('Stage', 'Merge', 'Other'))
 );
 GO
 
-CREATE INDEX [IX_monitor_PipelineProcedureLog_RunId]
-    ON [monitor].[PipelineProcedureLog] ([PipelineRunId]);
+CREATE INDEX [IX_monitor_PipelineProcedureLog_RunLogId]
+    ON [monitor].[PipelineProcedureLog] ([PipelineRunLogId]);
 GO
 
 CREATE INDEX [IX_monitor_PipelineProcedureLog_ProcedureName_StartUtc]

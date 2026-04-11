@@ -29,6 +29,7 @@ CREATE TABLE [monitor].[PipelineRunLog]
     [CreatedUtc] DATETIME2(3) NOT NULL CONSTRAINT [DF_monitor_PipelineRunLog_CreatedUtc] DEFAULT (SYSUTCDATETIME()),
     [UpdatedUtc] DATETIME2(3) NOT NULL CONSTRAINT [DF_monitor_PipelineRunLog_UpdatedUtc] DEFAULT (SYSUTCDATETIME()),
     CONSTRAINT [PK_monitor_PipelineRunLog] PRIMARY KEY CLUSTERED ([Id] ASC),
+    CONSTRAINT [UQ_monitor_PipelineRunLog_PipelineRunId] UNIQUE ([PipelineRunId]),
     CONSTRAINT [CK_monitor_PipelineRunLog_Status] CHECK ([Status] IN ('Started', 'Succeeded', 'Failed', 'Cancelled'))
 );
 GO

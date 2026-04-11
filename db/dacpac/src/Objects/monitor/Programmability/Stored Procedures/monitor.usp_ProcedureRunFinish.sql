@@ -31,6 +31,7 @@ BEGIN
     DECLARE @NormalizedProcedureName SYSNAME = NULLIF(TRIM(@ProcedureName), '');
     DECLARE @NormalizedStatus NVARCHAR(20) = NULLIF(TRIM(@Status), '');
     DECLARE @NormalizedErrorMessage NVARCHAR(4000) = NULLIF(TRIM(@ErrorMessage), '');
+    DECLARE @PipelineRunLogId BIGINT = NULL;
 
     IF @NormalizedPipelineRunId IS NULL
     BEGIN
@@ -98,6 +99,17 @@ BEGIN
         THROW 51052, 'Writes cannot be negative.', 1;
     END;
 
+    SELECT @PipelineRunLogId = p.[Id]
+    FROM
+        [monitor].[PipelineRunLog] AS p
+    WHERE
+        p.[PipelineRunId] = @NormalizedPipelineRunId;
+
+    IF @PipelineRunLogId IS NULL
+    BEGIN
+        THROW 51002, 'PipelineRunId not found in monitor.PipelineRunLog. Log pipeline start first.', 1;
+    END;
+
     BEGIN TRY
         UPDATE p
         SET
@@ -120,7 +132,7 @@ BEGIN
         FROM
             [monitor].[PipelineProcedureLog] AS p
         WHERE
-            p.[PipelineRunId] = @NormalizedPipelineRunId
+            p.[PipelineRunLogId] = @PipelineRunLogId
             AND p.[ProcedureName] = @NormalizedProcedureName;
 
         IF @@ROWCOUNT = 0
