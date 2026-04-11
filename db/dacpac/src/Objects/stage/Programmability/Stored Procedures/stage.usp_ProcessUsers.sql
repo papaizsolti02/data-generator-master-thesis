@@ -5,11 +5,33 @@
 -- Description: Truncates stage.Users, loads from raw.Users, and processes data.
 -- Version: 1.0
 -- -----------------------------------------------------------------------------
-CREATE PROCEDURE [stage].[usp_ProcessUsers]
+
+CREATE PROCEDURE [stage].[usp_ProcessUsers] -- noqa: 
+    @PipelineRunId NVARCHAR(128) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    DECLARE @NormalizedPipelineRunId NVARCHAR(128) = NULLIF(TRIM(@PipelineRunId), '');
+    DECLARE @RowsRead BIGINT = 0;
+    DECLARE @RowsScanned BIGINT = 0;
+    DECLARE @RowsWritten BIGINT = 0;
+    DECLARE @RowsInserted BIGINT = 0;
+    DECLARE @RowsUpdated BIGINT = 0;
+    DECLARE @RowsExpired BIGINT = 0;
+
+    DECLARE @ProcStartUtc DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @ProcEndUtc DATETIME2(3) = NULL;
+    DECLARE @ProcObjectId INT = OBJECT_ID(N'[stage].[usp_ProcessUsers]');
+
+    DECLARE @CpuDelta BIGINT = NULL;
+    DECLARE @LogicalReadsDelta BIGINT = NULL;
+    DECLARE @PhysicalReadsDelta BIGINT = NULL;
+    DECLARE @WritesDelta BIGINT = NULL;
+
+    DECLARE @ErrorNumber INT = NULL;
+    DECLARE @ErrorMessage NVARCHAR(4000) = NULL;
 
     IF OBJECT_ID(N'[stage].[Users]', N'U') IS NULL
     BEGIN
@@ -34,6 +56,14 @@ BEGIN
     IF OBJECT_ID(N'[config].[PaymentMethods]', N'U') IS NULL
     BEGIN
         THROW 50005, 'Required table [config].[PaymentMethods] does not exist.', 1;
+    END;
+
+    IF @NormalizedPipelineRunId IS NOT NULL
+    BEGIN
+        EXEC [monitor].[usp_ProcedureRunStart]
+            @PipelineRunId = @NormalizedPipelineRunId,
+            @ProcedureName = N'stage.usp_ProcessUsers',
+            @ProcedurePhase = N'Stage';
     END;
 
     BEGIN TRY
@@ -88,6 +118,10 @@ BEGIN
         FROM
             [raw].[Users] AS r;
 
+        SET @RowsRead = @@ROWCOUNT;
+        SET @RowsWritten = @RowsRead;
+        SET @RowsInserted = @RowsRead;
+
         UPDATE s
         SET
             s.[FirstName] = TRIM(s.[FirstName]),
@@ -107,6 +141,8 @@ BEGIN
             s.[PlanAddons] = TRIM(s.[PlanAddons])
         FROM
             [stage].[Users] AS s;
+
+        SET @RowsUpdated += @@ROWCOUNT;
 
         UPDATE s
         SET
@@ -130,6 +166,8 @@ BEGIN
         FROM
             [stage].[Users] AS s;
 
+        SET @RowsUpdated += @@ROWCOUNT;
+
         UPDATE s
         SET
             s.[CountryCode] = c.[CountryCode]
@@ -137,6 +175,8 @@ BEGIN
             [stage].[Users] AS s
         LEFT JOIN [config].[Countries] AS c
             ON s.[Country] = c.[CountryName];
+
+        SET @RowsUpdated += @@ROWCOUNT;
 
         UPDATE s
         SET
@@ -151,6 +191,8 @@ BEGIN
         LEFT JOIN [config].[SubscriptionTiers] AS t
             ON s.[SubscriptionTier] = t.[TierCode];
 
+        SET @RowsUpdated += @@ROWCOUNT;
+
         UPDATE s
         SET
             s.[PaymentMethodGroup] = p.[PaymentMethodGroup],
@@ -162,6 +204,8 @@ BEGIN
             [stage].[Users] AS s
         LEFT JOIN [config].[PaymentMethods] AS p
             ON s.[PaymentMethod] = p.[PaymentMethodCode];
+
+        SET @RowsUpdated += @@ROWCOUNT;
 
         UPDATE s
         SET
@@ -192,12 +236,135 @@ BEGIN
         FROM
             [stage].[Users] AS s;
 
+        SET @RowsScanned = @RowsRead + @RowsUpdated;
+
         COMMIT TRAN;
+
+        SET @ProcEndUtc = SYSUTCDATETIME();
+
+        IF EXISTS (
+            SELECT 1
+            FROM [sys].[database_query_store_options] AS qo
+            WHERE qo.[actual_state_desc] IN ('READ_WRITE', 'READ_ONLY')
+        )
+        BEGIN
+            BEGIN TRY
+                SELECT
+                    @CpuDelta = CAST(SUM(CAST(rs.[avg_cpu_time] AS DECIMAL(38, 6)) * rs.[count_executions]) / 1000.0 AS BIGINT),
+                    @LogicalReadsDelta = CAST(SUM(CAST(rs.[avg_logical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @PhysicalReadsDelta = CAST(SUM(CAST(rs.[avg_physical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @WritesDelta = CAST(SUM(CAST(rs.[avg_logical_io_writes] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT)
+                FROM
+                    [sys].[query_store_query] AS q
+                INNER JOIN [sys].[query_store_plan] AS p
+                    ON q.[query_id] = p.[query_id]
+                INNER JOIN [sys].[query_store_runtime_stats] AS rs
+                    ON p.[plan_id] = rs.[plan_id]
+                INNER JOIN [sys].[query_store_runtime_stats_interval] AS rsi
+                    ON rs.[runtime_stats_interval_id] = rsi.[runtime_stats_interval_id]
+                WHERE
+                    q.[object_id] = @ProcObjectId
+                    AND rsi.[start_time] < @ProcEndUtc
+                    AND rsi.[end_time] > @ProcStartUtc;
+            END TRY
+            BEGIN CATCH
+                SET @CpuDelta = NULL;
+                SET @LogicalReadsDelta = NULL;
+                SET @PhysicalReadsDelta = NULL;
+                SET @WritesDelta = NULL;
+            END CATCH;
+        END;
+
+        IF @NormalizedPipelineRunId IS NOT NULL
+        BEGIN
+            EXEC [monitor].[usp_ProcedureRunFinish]
+                @PipelineRunId = @NormalizedPipelineRunId,
+                @ProcedureName = N'stage.usp_ProcessUsers',
+                @Status = N'Succeeded',
+                @RowsRead = @RowsRead,
+                @RowsScanned = @RowsScanned,
+                @RowsWritten = @RowsWritten,
+                @RowsInserted = @RowsInserted,
+                @RowsUpdated = @RowsUpdated,
+                @RowsExpired = @RowsExpired,
+                @CpuTimeMs = @CpuDelta,
+                @LogicalReads = @LogicalReadsDelta,
+                @PhysicalReads = @PhysicalReadsDelta,
+                @Writes = @WritesDelta;
+        END;
     END TRY
     BEGIN CATCH
+        SET @ErrorNumber = ERROR_NUMBER();
+        SET @ErrorMessage = ERROR_MESSAGE();
+
         IF @@TRANCOUNT > 0
         BEGIN
             ROLLBACK TRAN;
+        END;
+
+        SET @ProcEndUtc = SYSUTCDATETIME();
+
+        IF EXISTS (
+            SELECT 1
+            FROM [sys].[database_query_store_options] AS qo
+            WHERE qo.[actual_state_desc] IN ('READ_WRITE', 'READ_ONLY')
+        )
+        BEGIN
+            BEGIN TRY
+                SELECT
+                    @CpuDelta = CAST(SUM(CAST(rs.[avg_cpu_time] AS DECIMAL(38, 6)) * rs.[count_executions]) / 1000.0 AS BIGINT),
+                    @LogicalReadsDelta = CAST(SUM(CAST(rs.[avg_logical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @PhysicalReadsDelta = CAST(SUM(CAST(rs.[avg_physical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @WritesDelta = CAST(SUM(CAST(rs.[avg_logical_io_writes] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT)
+                FROM
+                    [sys].[query_store_query] AS q
+                INNER JOIN [sys].[query_store_plan] AS p
+                    ON q.[query_id] = p.[query_id]
+                INNER JOIN [sys].[query_store_runtime_stats] AS rs
+                    ON p.[plan_id] = rs.[plan_id]
+                INNER JOIN [sys].[query_store_runtime_stats_interval] AS rsi
+                    ON rs.[runtime_stats_interval_id] = rsi.[runtime_stats_interval_id]
+                WHERE
+                    q.[object_id] = @ProcObjectId
+                    AND rsi.[start_time] < @ProcEndUtc
+                    AND rsi.[end_time] > @ProcStartUtc;
+            END TRY
+            BEGIN CATCH
+                SET @CpuDelta = NULL;
+                SET @LogicalReadsDelta = NULL;
+                SET @PhysicalReadsDelta = NULL;
+                SET @WritesDelta = NULL;
+            END CATCH;
+        END;
+
+        IF @RowsScanned = 0
+        BEGIN
+            SET @RowsScanned = @RowsRead + @RowsUpdated;
+        END;
+
+        IF @NormalizedPipelineRunId IS NOT NULL
+        BEGIN
+            BEGIN TRY
+                EXEC [monitor].[usp_ProcedureRunFinish]
+                    @PipelineRunId = @NormalizedPipelineRunId,
+                    @ProcedureName = N'stage.usp_ProcessUsers',
+                    @Status = N'Failed',
+                    @RowsRead = @RowsRead,
+                    @RowsScanned = @RowsScanned,
+                    @RowsWritten = @RowsWritten,
+                    @RowsInserted = @RowsInserted,
+                    @RowsUpdated = @RowsUpdated,
+                    @RowsExpired = @RowsExpired,
+                    @CpuTimeMs = @CpuDelta,
+                    @LogicalReads = @LogicalReadsDelta,
+                    @PhysicalReads = @PhysicalReadsDelta,
+                    @Writes = @WritesDelta,
+                    @ErrorNumber = @ErrorNumber,
+                    @ErrorMessage = @ErrorMessage;
+            END TRY
+            BEGIN CATCH
+            -- Preserve original ETL failure if monitoring logging fails.
+            END CATCH;
         END;
 
         THROW;

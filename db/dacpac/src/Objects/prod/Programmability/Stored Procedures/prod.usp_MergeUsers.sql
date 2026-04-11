@@ -6,16 +6,37 @@
 -- Version: 1.0
 -- -----------------------------------------------------------------------------
 
-CREATE PROCEDURE [prod].[usp_MergeUsers] -- noqa: 
+CREATE PROCEDURE [prod].[usp_MergeUsers]
+    @PipelineRunId NVARCHAR(128) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    DECLARE @NormalizedPipelineRunId NVARCHAR(128) = NULLIF(TRIM(@PipelineRunId), '');
     DECLARE @AsOfDate DATETIME = CURRENT_TIMESTAMP;
     DECLARE @MatchedCount INT = 0;
     DECLARE @ExpiredCount INT = 0;
     DECLARE @InsertedCount INT = 0;
+
+    DECLARE @RowsRead BIGINT = 0;
+    DECLARE @RowsScanned BIGINT = 0;
+    DECLARE @RowsWritten BIGINT = 0;
+    DECLARE @RowsInserted BIGINT = 0;
+    DECLARE @RowsUpdated BIGINT = 0;
+    DECLARE @RowsExpired BIGINT = 0;
+
+    DECLARE @ProcStartUtc DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @ProcEndUtc DATETIME2(3) = NULL;
+    DECLARE @ProcObjectId INT = OBJECT_ID(N'[prod].[usp_MergeUsers]');
+
+    DECLARE @CpuDelta BIGINT = NULL;
+    DECLARE @LogicalReadsDelta BIGINT = NULL;
+    DECLARE @PhysicalReadsDelta BIGINT = NULL;
+    DECLARE @WritesDelta BIGINT = NULL;
+
+    DECLARE @ErrorNumber INT = NULL;
+    DECLARE @ErrorMessage NVARCHAR(4000) = NULL;
 
     IF OBJECT_ID(N'[stage].[Users]', N'U') IS NULL
     BEGIN
@@ -27,8 +48,19 @@ BEGIN
         THROW 50102, 'Required table [prod].[Users] does not exist.', 1;
     END;
 
+    IF @NormalizedPipelineRunId IS NOT NULL
+    BEGIN
+        EXEC [monitor].[usp_ProcedureRunStart]
+            @PipelineRunId = @NormalizedPipelineRunId,
+            @ProcedureName = N'prod.usp_MergeUsers',
+            @ProcedurePhase = N'Merge';
+    END;
+
     BEGIN TRY
         BEGIN TRAN;
+
+        SELECT @RowsRead = COUNT_BIG(1)
+        FROM [stage].[Users];
 
         -- 1) Update current rows where hash is present in stage (update non hash fields)
         UPDATE p
@@ -170,13 +202,73 @@ BEGIN
 
         SET @InsertedCount = @@ROWCOUNT;
 
+        SET @RowsInserted = @InsertedCount;
+        SET @RowsWritten = @InsertedCount;
+        SET @RowsExpired = @ExpiredCount;
+
         UPDATE p
         SET
             p.[LastRefreshedDate] = @AsOfDate
         FROM
             [prod].[Users] AS p;
 
+        SET @RowsUpdated = CAST(@MatchedCount AS BIGINT);
+        SET @RowsScanned = @RowsRead;
+
         COMMIT TRAN;
+
+        SET @ProcEndUtc = SYSUTCDATETIME();
+
+        IF EXISTS (
+            SELECT 1
+            FROM [sys].[database_query_store_options] AS qo
+            WHERE qo.[actual_state_desc] IN ('READ_WRITE', 'READ_ONLY')
+        )
+        BEGIN
+            BEGIN TRY
+                SELECT
+                    @CpuDelta = CAST(SUM(CAST(rs.[avg_cpu_time] AS DECIMAL(38, 6)) * rs.[count_executions]) / 1000.0 AS BIGINT),
+                    @LogicalReadsDelta = CAST(SUM(CAST(rs.[avg_logical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @PhysicalReadsDelta = CAST(SUM(CAST(rs.[avg_physical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @WritesDelta = CAST(SUM(CAST(rs.[avg_logical_io_writes] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT)
+                FROM
+                    [sys].[query_store_query] AS q
+                INNER JOIN [sys].[query_store_plan] AS p
+                    ON q.[query_id] = p.[query_id]
+                INNER JOIN [sys].[query_store_runtime_stats] AS rs
+                    ON p.[plan_id] = rs.[plan_id]
+                INNER JOIN [sys].[query_store_runtime_stats_interval] AS rsi
+                    ON rs.[runtime_stats_interval_id] = rsi.[runtime_stats_interval_id]
+                WHERE
+                q.[object_id] = @ProcObjectId
+                    AND rsi.[start_time] < @ProcEndUtc
+                    AND rsi.[end_time] > @ProcStartUtc;
+            END TRY
+            BEGIN CATCH
+                SET @CpuDelta = NULL;
+                SET @LogicalReadsDelta = NULL;
+                SET @PhysicalReadsDelta = NULL;
+                SET @WritesDelta = NULL;
+            END CATCH;
+        END;
+
+        IF @NormalizedPipelineRunId IS NOT NULL
+        BEGIN
+            EXEC [monitor].[usp_ProcedureRunFinish]
+                @PipelineRunId = @NormalizedPipelineRunId,
+                @ProcedureName = N'prod.usp_MergeUsers',
+                @Status = N'Succeeded',
+                @RowsRead = @RowsRead,
+                @RowsScanned = @RowsScanned,
+                @RowsWritten = @RowsWritten,
+                @RowsInserted = @RowsInserted,
+                @RowsUpdated = @RowsUpdated,
+                @RowsExpired = @RowsExpired,
+                @CpuTimeMs = @CpuDelta,
+                @LogicalReads = @LogicalReadsDelta,
+                @PhysicalReads = @PhysicalReadsDelta,
+                @Writes = @WritesDelta;
+        END;
 
         SELECT
             @AsOfDate AS [MergeTimestamp],
@@ -185,9 +277,77 @@ BEGIN
             @InsertedCount AS [InsertedRows];
     END TRY
     BEGIN CATCH
+        SET @ErrorNumber = ERROR_NUMBER();
+        SET @ErrorMessage = ERROR_MESSAGE();
+
         IF @@TRANCOUNT > 0
         BEGIN
             ROLLBACK TRAN;
+        END;
+
+        SET @ProcEndUtc = SYSUTCDATETIME();
+
+        IF EXISTS (
+            SELECT 1
+            FROM [sys].[database_query_store_options] AS qo
+            WHERE qo.[actual_state_desc] IN ('READ_WRITE', 'READ_ONLY')
+        )
+        BEGIN
+            BEGIN TRY
+                SELECT
+                    @CpuDelta = CAST(SUM(CAST(rs.[avg_cpu_time] AS DECIMAL(38, 6)) * rs.[count_executions]) / 1000.0 AS BIGINT),
+                    @LogicalReadsDelta = CAST(SUM(CAST(rs.[avg_logical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @PhysicalReadsDelta = CAST(SUM(CAST(rs.[avg_physical_io_reads] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT),
+                    @WritesDelta = CAST(SUM(CAST(rs.[avg_logical_io_writes] AS DECIMAL(38, 6)) * rs.[count_executions]) AS BIGINT)
+                FROM
+                    [sys].[query_store_query] AS q
+                INNER JOIN [sys].[query_store_plan] AS p
+                    ON q.[query_id] = p.[query_id]
+                INNER JOIN [sys].[query_store_runtime_stats] AS rs
+                    ON p.[plan_id] = rs.[plan_id]
+                INNER JOIN [sys].[query_store_runtime_stats_interval] AS rsi
+                    ON rs.[runtime_stats_interval_id] = rsi.[runtime_stats_interval_id]
+                WHERE
+                    q.[object_id] = @ProcObjectId
+                    AND rsi.[start_time] < @ProcEndUtc
+                    AND rsi.[end_time] > @ProcStartUtc;
+            END TRY
+            BEGIN CATCH
+                SET @CpuDelta = NULL;
+                SET @LogicalReadsDelta = NULL;
+                SET @PhysicalReadsDelta = NULL;
+                SET @WritesDelta = NULL;
+            END CATCH;
+        END;
+
+        IF @RowsScanned = 0
+        BEGIN
+            SET @RowsScanned = @RowsRead;
+        END;
+
+        IF @NormalizedPipelineRunId IS NOT NULL
+        BEGIN
+            BEGIN TRY
+                EXEC [monitor].[usp_ProcedureRunFinish]
+                    @PipelineRunId = @NormalizedPipelineRunId,
+                    @ProcedureName = N'prod.usp_MergeUsers',
+                    @Status = N'Failed',
+                    @RowsRead = @RowsRead,
+                    @RowsScanned = @RowsScanned,
+                    @RowsWritten = @RowsWritten,
+                    @RowsInserted = @RowsInserted,
+                    @RowsUpdated = @RowsUpdated,
+                    @RowsExpired = @RowsExpired,
+                    @CpuTimeMs = @CpuDelta,
+                    @LogicalReads = @LogicalReadsDelta,
+                    @PhysicalReads = @PhysicalReadsDelta,
+                    @Writes = @WritesDelta,
+                    @ErrorNumber = @ErrorNumber,
+                    @ErrorMessage = @ErrorMessage;
+            END TRY
+            BEGIN CATCH
+                -- Preserve original ETL failure if monitoring logging fails.
+            END CATCH;
         END;
 
         THROW;
