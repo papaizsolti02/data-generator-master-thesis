@@ -69,14 +69,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          PARAMS=$(cat <<EOF
-          {
-            "fileName": "${{ inputs.fileName }}",
-            "SCD2Method": "FullSCD2",
-            "EnvironmentName": "${{ inputs.EnvironmentName }}"
-          }
-          EOF
-          )
+          PARAMS="{\"fileName\":\"${{ inputs.fileName }}\",\"SCD2Method\":\"FullSCD2\",\"EnvironmentName\":\"${{ inputs.EnvironmentName }}\"}"
 
           RUN_ID=$(az datafactory pipeline create-run \
             --resource-group "$ADF_RESOURCE_GROUP" \
