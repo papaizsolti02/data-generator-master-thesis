@@ -112,7 +112,7 @@ BEGIN
             [MarketingConsent], [PreferredLanguage], [ContentLanguage], [PlanAddons], [Hashdata], [Rowhash], [LastRefreshedDate]
         )
         SELECT
-            c.[Email], c.[Username], c.[SubscriptionTier], c.[BillingCycle], c.[PaymentMethod], c.[AutoRenew], 
+            c.[Email], c.[Username], c.[SubscriptionTier], c.[BillingCycle], c.[PaymentMethod], c.[AutoRenew],
             c.[MarketingConsent], c.[PreferredLanguage], c.[ContentLanguage], c.[PlanAddons], c.[Hashdata], c.[Rowhash], SYSUTCDATETIME()
         FROM #CurrentComparable AS c
         LEFT JOIN [snapshot_scd2].[UserComparableState] AS s
@@ -126,7 +126,7 @@ BEGIN
 
         INSERT INTO [snapshot_scd2].[UserComparableState]
         (
-            [Email], [Username], [SubscriptionTier], [BillingCycle], [PaymentMethod], [AutoRenew], 
+            [Email], [Username], [SubscriptionTier], [BillingCycle], [PaymentMethod], [AutoRenew],
             [MarketingConsent], [PreferredLanguage], [ContentLanguage], [PlanAddons], [Hashdata], [Rowhash], [LastRefreshedDate]
         )
         SELECT
