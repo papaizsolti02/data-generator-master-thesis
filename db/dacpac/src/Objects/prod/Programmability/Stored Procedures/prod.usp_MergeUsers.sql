@@ -89,7 +89,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsRead output;
+            @OutRows = @RowsRead OUTPUT;
 
         -- 1) Update current rows where hash is present in stage (update non hash fields)
         SET @Sql = N'
@@ -130,7 +130,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows INT OUTPUT',
-            @OutRows = @MatchedCount output;
+            @OutRows = @MatchedCount OUTPUT;
 
         -- 2) Expire active rows whose hash is no longer present in stage
         SET @Sql = N'
@@ -153,7 +153,7 @@ BEGIN
             @Sql,
             N'@AsOfDate DATETIME, @OutRows INT OUTPUT',
             @AsOfDate = @AsOfDate,
-            @OutRows = @ExpiredCount output;
+            @OutRows = @ExpiredCount OUTPUT;
 
         -- 3) Insert rows whose hash cannot be found in current active prod
         SET @Sql = N'
@@ -182,7 +182,7 @@ BEGIN
             @Sql,
             N'@AsOfDate DATETIME, @OutRows INT OUTPUT',
             @AsOfDate = @AsOfDate,
-            @OutRows = @InsertedCount output;
+            @OutRows = @InsertedCount OUTPUT;
 
         SET @RowsInserted = @InsertedCount;
         SET @RowsWritten = @InsertedCount;

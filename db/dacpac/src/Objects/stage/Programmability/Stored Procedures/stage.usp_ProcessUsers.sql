@@ -120,7 +120,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsRead output;
+            @OutRows = @RowsRead OUTPUT;
 
         SET @RowsWritten = @RowsRead;
         SET @RowsInserted = @RowsRead;
@@ -149,7 +149,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsTouched output;
+            @OutRows = @RowsTouched OUTPUT;
 
         SET @RowsUpdated += @RowsTouched;
 
@@ -167,7 +167,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsTouched output;
+            @OutRows = @RowsTouched OUTPUT;
 
         SET @RowsUpdated += @RowsTouched;
 
@@ -182,7 +182,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsTouched output;
+            @OutRows = @RowsTouched OUTPUT;
 
         SET @RowsUpdated += @RowsTouched;
 
@@ -199,7 +199,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsTouched output;
+            @OutRows = @RowsTouched OUTPUT;
 
         SET @RowsUpdated += @RowsTouched;
 
@@ -216,7 +216,7 @@ BEGIN
         EXEC sys.sp_executesql
             @Sql,
             N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsTouched output;
+            @OutRows = @RowsTouched OUTPUT;
 
         SET @RowsUpdated += @RowsTouched;
 
