@@ -1,30 +1,22 @@
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------
 -- Author: Csaba-Zsolt Papai
--- Date: 2026-04-11
--- Name: prod.usp_MergeUsers
--- Description: SCD2 merge from stage.Users to prod.Users using update + insert.
+-- Date: 2026-04-14
+-- Name: snapshot_scd2.usp_DetectDeltaAndRefreshState
+-- Description: Builds today comparable rows, detects delta by Rowhash, refreshes comparable state.
 -- Version: 1.0
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------
 
-CREATE PROCEDURE [prod].[usp_MergeUsers]
-    @PipelineRunId NVARCHAR(128) = NULL,
-    @SCD2Method NVARCHAR(50) = N'FullSCD2'
+CREATE PROCEDURE [snapshot_scd2].[usp_DetectDeltaAndRefreshState]
+    @PipelineRunId NVARCHAR(128) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
     DECLARE @NormalizedPipelineRunId NVARCHAR(128) = NULLIF(TRIM(@PipelineRunId), '');
-    DECLARE @NormalizedMethod NVARCHAR(50) = UPPER(ISNULL(NULLIF(TRIM(@SCD2Method), ''), 'FULLSCD2'));
-    DECLARE @TargetSchema SYSNAME = NULL;
-    DECLARE @StageUsersTable NVARCHAR(300) = NULL;
-    DECLARE @ProdUsersTable NVARCHAR(300) = NULL;
-    DECLARE @Sql NVARCHAR(MAX) = NULL;
-    DECLARE @IsSnapshotMode BIT = 0;
-    DECLARE @AsOfDate DATETIME = CURRENT_TIMESTAMP;
-    DECLARE @MatchedCount INT = 0;
-    DECLARE @ExpiredCount INT = 0;
-    DECLARE @InsertedCount INT = 0;
+    DECLARE @ProcStartUtc DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @ProcEndUtc DATETIME2(3) = NULL;
+    DECLARE @ProcObjectId INT = OBJECT_ID(N'[snapshot_scd2].[usp_DetectDeltaAndRefreshState]');
 
     DECLARE @RowsRead BIGINT = 0;
     DECLARE @RowsScanned BIGINT = 0;
@@ -32,10 +24,7 @@ BEGIN
     DECLARE @RowsInserted BIGINT = 0;
     DECLARE @RowsUpdated BIGINT = 0;
     DECLARE @RowsExpired BIGINT = 0;
-
-    DECLARE @ProcStartUtc DATETIME2(3) = SYSUTCDATETIME();
-    DECLARE @ProcEndUtc DATETIME2(3) = NULL;
-    DECLARE @ProcObjectId INT = OBJECT_ID(N'[prod].[usp_MergeUsers]');
+    DECLARE @DeltaCount BIGINT = 0;
 
     DECLARE @CpuDelta BIGINT = NULL;
     DECLARE @LogicalReadsDelta BIGINT = NULL;
@@ -45,121 +34,153 @@ BEGIN
     DECLARE @ErrorNumber INT = NULL;
     DECLARE @ErrorMessage NVARCHAR(4000) = NULL;
 
-    IF @NormalizedMethod IN (N'FULLSCD2', N'FULL')
+    IF OBJECT_ID(N'[snapshot_scd2].[raw_Users]', N'U') IS NULL
     BEGIN
-        SET @TargetSchema = N'full_scd2';
-    END
-    ELSE IF @NormalizedMethod IN (N'SNAPSHOTSCD2', N'SNAPSHOT')
-    BEGIN
-        SET @TargetSchema = N'snapshot_scd2';
-        SET @IsSnapshotMode = 1;
-    END
-    ELSE IF @NormalizedMethod IN (N'MERKLESCD2', N'MERKLE')
-    BEGIN
-        SET @TargetSchema = N'merkle_scd2';
-    END
-    ELSE
-    BEGIN
-        THROW 50103, 'Unsupported SCD2Method. Allowed: FullSCD2, SnapshotSCD2, MerkleSCD2.', 1;
+        THROW 52001, 'Required table [snapshot_scd2].[raw_Users] does not exist.', 1;
     END;
 
-    SET @StageUsersTable = QUOTENAME(@TargetSchema) + N'.[stage_Users]';
-    SET @ProdUsersTable = QUOTENAME(@TargetSchema) + N'.[prod_Users]';
-
-    IF OBJECT_ID(@StageUsersTable, N'U') IS NULL
+    IF OBJECT_ID(N'[snapshot_scd2].[UserComparableState]', N'U') IS NULL
     BEGIN
-        THROW 50101, 'Required stage table for selected method does not exist.', 1;
+        THROW 52002, 'Required table [snapshot_scd2].[UserComparableState] does not exist.', 1;
     END;
 
-    IF OBJECT_ID(@ProdUsersTable, N'U') IS NULL
+    IF OBJECT_ID(N'[snapshot_scd2].[TodayComparable]', N'U') IS NULL
     BEGIN
-        THROW 50102, 'Required prod table for selected method does not exist.', 1;
+        THROW 52003, 'Required table [snapshot_scd2].[TodayComparable] does not exist.', 1;
     END;
 
     IF @NormalizedPipelineRunId IS NOT NULL
     BEGIN
         EXEC [monitor].[usp_ProcedureRunStart]
             @PipelineRunId = @NormalizedPipelineRunId,
-            @ProcedureName = N'prod.usp_MergeUsers',
-            @ProcedurePhase = N'Merge';
+            @ProcedureName = N'snapshot_scd2.usp_DetectDeltaAndRefreshState',
+            @ProcedurePhase = N'Other';
     END;
 
     BEGIN TRY
         BEGIN TRAN;
 
-        SET @Sql = N'SELECT @OutRows = COUNT_BIG(1) FROM ' + @StageUsersTable + N';';
-        EXEC sys.sp_executesql
-            @Sql,
-            N'@OutRows BIGINT OUTPUT',
-            @OutRows = @RowsRead OUTPUT;
+        TRUNCATE TABLE [snapshot_scd2].[TodayComparable];
 
-        -- 1) Expire active rows whose hash is not present in the current stage delta set
-        SET @Sql = N'
-            UPDATE p
-            SET
-                p.[IsActive] = 0,
-                p.[ExpirationDate] = @AsOfDate,
-                p.[LastRefreshedDate] = @AsOfDate
-            FROM ' + @ProdUsersTable + N' AS p
-            WHERE p.[IsActive] = 1
-              AND NOT EXISTS
-                (
-                    SELECT 1
-                    FROM ' + @StageUsersTable + N' AS s
-                    WHERE ISNULL(s.[Rowhash], 0x0) = ISNULL(p.[Rowhash], 0x0)
-                );
-            SET @OutRows = @@ROWCOUNT;';
+        SELECT
+            r.[Email],
+            r.[Username],
+            r.[SubscriptionTier],
+            r.[BillingCycle],
+            r.[PaymentMethod],
+            r.[AutoRenew],
+            r.[MarketingConsent],
+            r.[PreferredLanguage],
+            r.[ContentLanguage],
+            r.[PlanAddons],
+            CONCAT(
+                ISNULL(r.[Email], ''), '|',
+                ISNULL(r.[Username], ''), '|',
+                ISNULL(r.[SubscriptionTier], ''), '|',
+                ISNULL(r.[BillingCycle], ''), '|',
+                ISNULL(r.[PaymentMethod], ''), '|',
+                ISNULL(r.[AutoRenew], ''), '|',
+                ISNULL(r.[MarketingConsent], ''), '|',
+                ISNULL(r.[PreferredLanguage], ''), '|',
+                ISNULL(r.[ContentLanguage], ''), '|',
+                ISNULL(r.[PlanAddons], '')
+            ) AS [Hashdata],
+            HASHBYTES(
+                'SHA2_256',
+                CONCAT(
+                    ISNULL(r.[Email], ''), '|',
+                    ISNULL(r.[Username], ''), '|',
+                    ISNULL(r.[SubscriptionTier], ''), '|',
+                    ISNULL(r.[BillingCycle], ''), '|',
+                    ISNULL(r.[PaymentMethod], ''), '|',
+                    ISNULL(r.[AutoRenew], ''), '|',
+                    ISNULL(r.[MarketingConsent], ''), '|',
+                    ISNULL(r.[PreferredLanguage], ''), '|',
+                    ISNULL(r.[ContentLanguage], ''), '|',
+                    ISNULL(r.[PlanAddons], '')
+                )
+            ) AS [Rowhash]
+        INTO #CurrentComparable
+        FROM [snapshot_scd2].[raw_Users] AS r;
 
-        EXEC sys.sp_executesql
-            @Sql,
-            N'@AsOfDate DATETIME, @OutRows INT OUTPUT',
-            @AsOfDate = @AsOfDate,
-            @OutRows = @ExpiredCount OUTPUT;
+        CREATE NONCLUSTERED INDEX [IX__CurrentComparable_Rowhash]
+            ON #CurrentComparable ([Rowhash]);
 
-        -- 2) Insert rows whose hash cannot be found in current active prod
-        SET @Sql = N'
-            INSERT INTO ' + @ProdUsersTable + N'
-            (
-                [FullName], [FirstName], [LastName], [Email], [Username], [DateOfBirth], [YearOfBirth], [MonthOfBirth],
-                [DayOfBirth], [RegistrationDate], [Country], [CountryCode], [City], [Gender], [AccountCreatedVia],
-                [ReferralSource], [SubscriptionTier], [SubscriptionTierRank], [IsPaidTier], [BillingCycle], [PaymentMethod],
-                [PaymentMethodGroup], [IsCardBased], [AutoRenew], [MarketingConsent], [PreferredLanguage], [ContentLanguage],
-                [PlanAddons], [LastRefreshedDate], [EffectiveDate], [ExpirationDate], [IsActive], [Hashdata], [Rowhash]
-            )
-            SELECT
-                s.[FullName], s.[FirstName], s.[LastName], s.[Email], s.[Username], s.[DateOfBirth], s.[YearOfBirth], s.[MonthOfBirth],
-                s.[DayOfBirth], s.[RegistrationDate], s.[Country], s.[CountryCode], s.[City], s.[Gender], s.[AccountCreatedVia],
-                s.[ReferralSource], s.[SubscriptionTier], s.[SubscriptionTierRank], s.[IsPaidTier], s.[BillingCycle], s.[PaymentMethod],
-                s.[PaymentMethodGroup], s.[IsCardBased], s.[AutoRenew], s.[MarketingConsent], s.[PreferredLanguage], s.[ContentLanguage],
-                s.[PlanAddons], @AsOfDate, @AsOfDate, ''9999-12-31 00:00:00'', 1, s.[Hashdata], s.[Rowhash]
-            FROM ' + @StageUsersTable + N' AS s
-            LEFT JOIN ' + @ProdUsersTable + N' AS p
-                ON ISNULL(p.[Rowhash], 0x0) = ISNULL(s.[Rowhash], 0x0)
-                AND p.[IsActive] = 1
-            WHERE p.[Id] IS NULL;
-            SET @OutRows = @@ROWCOUNT;';
+        INSERT INTO [snapshot_scd2].[TodayComparable]
+        (
+            [Email],
+            [Username],
+            [SubscriptionTier],
+            [BillingCycle],
+            [PaymentMethod],
+            [AutoRenew],
+            [MarketingConsent],
+            [PreferredLanguage],
+            [ContentLanguage],
+            [PlanAddons],
+            [Hashdata],
+            [Rowhash],
+            [LastRefreshedDate]
+        )
+        SELECT
+            c.[Email],
+            c.[Username],
+            c.[SubscriptionTier],
+            c.[BillingCycle],
+            c.[PaymentMethod],
+            c.[AutoRenew],
+            c.[MarketingConsent],
+            c.[PreferredLanguage],
+            c.[ContentLanguage],
+            c.[PlanAddons],
+            c.[Hashdata],
+            c.[Rowhash],
+            SYSUTCDATETIME()
+        FROM #CurrentComparable AS c
+        LEFT JOIN [snapshot_scd2].[UserComparableState] AS s
+            ON ISNULL(s.[Rowhash], 0x0) = ISNULL(c.[Rowhash], 0x0)
+        WHERE s.[Id] IS NULL;
 
-        EXEC sys.sp_executesql
-            @Sql,
-            N'@AsOfDate DATETIME, @OutRows INT OUTPUT',
-            @AsOfDate = @AsOfDate,
-            @OutRows = @InsertedCount OUTPUT;
+        SET @DeltaCount = @@ROWCOUNT;
 
-        SET @RowsInserted = @InsertedCount;
-        SET @RowsWritten = @InsertedCount + @ExpiredCount;
-        SET @RowsExpired = @ExpiredCount;
+        DELETE s
+        FROM [snapshot_scd2].[UserComparableState] AS s;
 
-        SET @Sql = N'
-            UPDATE p
-            SET p.[LastRefreshedDate] = @AsOfDate
-            FROM ' + @ProdUsersTable + N' AS p;';
+        INSERT INTO [snapshot_scd2].[UserComparableState]
+        (
+            [Email],
+            [Username],
+            [SubscriptionTier],
+            [BillingCycle],
+            [PaymentMethod],
+            [AutoRenew],
+            [MarketingConsent],
+            [PreferredLanguage],
+            [ContentLanguage],
+            [PlanAddons],
+            [Hashdata],
+            [Rowhash],
+            [LastRefreshedDate]
+        )
+        SELECT
+            c.[Email],
+            c.[Username],
+            c.[SubscriptionTier],
+            c.[BillingCycle],
+            c.[PaymentMethod],
+            c.[AutoRenew],
+            c.[MarketingConsent],
+            c.[PreferredLanguage],
+            c.[ContentLanguage],
+            c.[PlanAddons],
+            c.[Hashdata],
+            c.[Rowhash],
+            SYSUTCDATETIME()
+        FROM #CurrentComparable AS c;
 
-        EXEC sys.sp_executesql
-            @Sql,
-            N'@AsOfDate DATETIME',
-            @AsOfDate = @AsOfDate;
-
-        SET @RowsUpdated = CASE WHEN @IsSnapshotMode = 1 THEN 0 ELSE CAST(@MatchedCount AS BIGINT) END;
+        SET @RowsRead = (SELECT COUNT_BIG(1) FROM [snapshot_scd2].[raw_Users]);
+        SET @RowsInserted = @DeltaCount;
+        SET @RowsWritten = @DeltaCount;
         SET @RowsScanned = @RowsRead;
 
         COMMIT TRAN;
@@ -187,7 +208,7 @@ BEGIN
                 INNER JOIN [sys].[query_store_runtime_stats_interval] AS rsi
                     ON rs.[runtime_stats_interval_id] = rsi.[runtime_stats_interval_id]
                 WHERE
-                q.[object_id] = @ProcObjectId
+                    q.[object_id] = @ProcObjectId
                     AND rsi.[start_time] < @ProcEndUtc
                     AND rsi.[end_time] > @ProcStartUtc;
             END TRY
@@ -203,7 +224,7 @@ BEGIN
         BEGIN
             EXEC [monitor].[usp_ProcedureRunFinish]
                 @PipelineRunId = @NormalizedPipelineRunId,
-                @ProcedureName = N'prod.usp_MergeUsers',
+                @ProcedureName = N'snapshot_scd2.usp_DetectDeltaAndRefreshState',
                 @Status = N'Succeeded',
                 @RowsRead = @RowsRead,
                 @RowsScanned = @RowsScanned,
@@ -216,12 +237,6 @@ BEGIN
                 @PhysicalReads = @PhysicalReadsDelta,
                 @Writes = @WritesDelta;
         END;
-
-        SELECT
-            @AsOfDate AS [MergeTimestamp],
-            @MatchedCount AS [MatchedRows],
-            @ExpiredCount AS [ExpiredRows],
-            @InsertedCount AS [InsertedRows];
     END TRY
     BEGIN CATCH
         SET @ErrorNumber = ERROR_NUMBER();
@@ -267,17 +282,12 @@ BEGIN
             END CATCH;
         END;
 
-        IF @RowsScanned = 0
-        BEGIN
-            SET @RowsScanned = @RowsRead;
-        END;
-
         IF @NormalizedPipelineRunId IS NOT NULL
         BEGIN
             BEGIN TRY
                 EXEC [monitor].[usp_ProcedureRunFinish]
                     @PipelineRunId = @NormalizedPipelineRunId,
-                    @ProcedureName = N'prod.usp_MergeUsers',
+                    @ProcedureName = N'snapshot_scd2.usp_DetectDeltaAndRefreshState',
                     @Status = N'Failed',
                     @RowsRead = @RowsRead,
                     @RowsScanned = @RowsScanned,
@@ -293,7 +303,6 @@ BEGIN
                     @ErrorMessage = @ErrorMessage;
             END TRY
             BEGIN CATCH
-                -- Preserve original ETL failure if monitoring logging fails.
             END CATCH;
         END;
 
