@@ -18,6 +18,7 @@ BEGIN
     DECLARE @NormalizedMethod NVARCHAR(50) = UPPER(ISNULL(NULLIF(TRIM(@SCD2Method), ''), 'FULLSCD2'));
     DECLARE @TargetSchema SYSNAME = NULL;
     DECLARE @RawUsersTable NVARCHAR(300) = NULL;
+    DECLARE @ComparableUsersTable NVARCHAR(300) = NULL;
     DECLARE @StageUsersTable NVARCHAR(300) = NULL;
     DECLARE @Sql NVARCHAR(MAX) = NULL;
     DECLARE @RowsTouched BIGINT = 0;
@@ -58,6 +59,7 @@ BEGIN
     END;
 
     SET @RawUsersTable = QUOTENAME(@TargetSchema) + N'.[raw_Users]';
+    SET @ComparableUsersTable = QUOTENAME(@TargetSchema) + N'.[TodayComparableUsers]';
     SET @StageUsersTable = QUOTENAME(@TargetSchema) + N'.[stage_Users]';
 
     IF OBJECT_ID(@StageUsersTable, N'U') IS NULL
@@ -68,6 +70,12 @@ BEGIN
     IF OBJECT_ID(@RawUsersTable, N'U') IS NULL
     BEGIN
         THROW 50002, 'Required raw table for selected method does not exist.', 1;
+    END;
+
+    IF @NormalizedMethod IN (N'SNAPSHOTSCD2', N'SNAPSHOT')
+       AND OBJECT_ID(@ComparableUsersTable, N'U') IS NULL
+    BEGIN
+        THROW 50006, 'Required comparable delta table for snapshot mode does not exist.', 1;
     END;
 
     IF OBJECT_ID(N'[config].[Countries]', N'U') IS NULL
@@ -114,7 +122,7 @@ BEGIN
                 CASE WHEN r.[AutoRenew] = ''1'' THEN ''Yes'' ELSE ''No'' END,
                 CASE WHEN r.[MarketingConsent] = ''1'' THEN ''Yes'' ELSE ''No'' END,
                 r.[PreferredLanguage], r.[ContentLanguage], r.[PlanAddons], CURRENT_TIMESTAMP
-            FROM ' + @RawUsersTable + N' AS r;
+            FROM ' + CASE WHEN @NormalizedMethod IN (N'SNAPSHOTSCD2', N'SNAPSHOT') THEN @ComparableUsersTable ELSE @RawUsersTable END + N' AS r;
             SET @OutRows = @@ROWCOUNT;';
 
         EXEC sys.sp_executesql
