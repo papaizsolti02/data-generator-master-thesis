@@ -59,8 +59,16 @@ BEGIN
 	BEGIN TRY
 		BEGIN TRAN;
 
-		SELECT @RowsRead = COUNT_BIG(1)
+		SELECT @RowsRead = COUNT_BIG(*)
 		FROM [snapshot_scd2].[stage_Users];
+
+		SELECT @MatchedCount = COUNT(*)
+		FROM [snapshot_scd2].[stage_Users] AS s
+		INNER JOIN [snapshot_scd2].[prod_Users] AS p
+			ON p.[IsActive] = 1
+			AND ISNULL(p.[Email], '') = ISNULL(s.[Email], '')
+			AND ISNULL(p.[Username], '') = ISNULL(s.[Username], '')
+			AND ISNULL(p.[Rowhash], 0x0) = ISNULL(s.[Rowhash], 0x0);
 
 		UPDATE p
 		SET
@@ -68,13 +76,11 @@ BEGIN
 			p.[ExpirationDate] = @AsOfDate,
 			p.[LastRefreshedDate] = @AsOfDate
 		FROM [snapshot_scd2].[prod_Users] AS p
+		INNER JOIN [snapshot_scd2].[stage_Users] AS s
+			ON ISNULL(p.[Email], '') = ISNULL(s.[Email], '')
+			AND ISNULL(p.[Username], '') = ISNULL(s.[Username], '')
 		WHERE p.[IsActive] = 1
-			AND NOT EXISTS
-			(
-				SELECT 1
-				FROM [snapshot_scd2].[stage_Users] AS s
-				WHERE ISNULL(s.[Rowhash], 0x0) = ISNULL(p.[Rowhash], 0x0)
-			);
+			AND ISNULL(p.[Rowhash], 0x0) <> ISNULL(s.[Rowhash], 0x0);
 
 		SET @ExpiredCount = @@ROWCOUNT;
 
