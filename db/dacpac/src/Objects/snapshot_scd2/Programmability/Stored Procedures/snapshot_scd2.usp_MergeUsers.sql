@@ -82,7 +82,7 @@ BEGIN
 
         SET @ExpiredCount = @@ROWCOUNT;
 
-        -- 2. EXPIRE DELETED (optional but included)
+        -- 2. EXPIRE DELETED
         UPDATE p
         SET
             p.IsActive = 0,
